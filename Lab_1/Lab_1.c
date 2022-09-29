@@ -1,7 +1,10 @@
 #define _CRT_SECURE_NO_DEPRECATE
 #include<stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include<string.h>
 #include<assert.h>
-#include<Windows.h>
+#include<Windows.h> // system("cls")
 
 #include "Queen.h"
 #include"Larvae.h"
@@ -17,14 +20,14 @@
 
 
 // Returns array of index file records
-IndexFileRecord* ReadIndexFile(FILE* index_file, int &records_count)
+IndexFileRecord* ReadIndexFile(FILE* index_file, int* records_count)
 {
 	fseek(index_file, 0, SEEK_END);
-	records_count = ftell(index_file) / sizeof(IndexFileRecord);
+	*records_count = ftell(index_file) / sizeof(IndexFileRecord);
 	fseek(index_file, 0, SEEK_SET);
 
-	IndexFileRecord* irecords = new IndexFileRecord[records_count];
-	fread((char*)irecords, sizeof(IndexFileRecord), records_count, index_file);
+	IndexFileRecord* irecords = malloc(*records_count * sizeof(IndexFileRecord) + 1);
+	fread((char*)irecords, sizeof(IndexFileRecord), *records_count, index_file);
 
 	assert(!ferror(index_file));
 
@@ -77,10 +80,10 @@ int BinarySearchOfTheQueen(int queen_id, IndexFileRecord* irecords, int records_
 int GetAddressInIndexFile(int queen_id, FILE* index_file)
 {
 	int records_number;
-	IndexFileRecord* irecords = ReadIndexFile(index_file, records_number);
+	IndexFileRecord* irecords = ReadIndexFile(index_file, &records_number);
 
 	int address = BinarySearchOfTheQueen(queen_id, irecords, records_number);
-	delete[] irecords;
+	free(irecords);
 	return address;
 }
 
@@ -108,13 +111,13 @@ bool CorrectMasterFile(int old_larvae_address, int new_larvae_address, FILE* mas
 	QueenRecord qrecord;
 	while (!feof(master_file) && !ferror(master_file))
 	{
-		ReadFromFile(master_file, qrecord);
+		ReadQueenFromFile(master_file, &qrecord);
 
 		if (qrecord.first_larvae_record_address == old_larvae_address)
 		{
 			qrecord.first_larvae_record_address = new_larvae_address;
 			fseek(master_file, qrecord_address * size_of_queen_record, SEEK_SET);
-			WriteToFile(qrecord, master_file);
+			WriteQueenToFile(qrecord, master_file);
 			return true;
 		}
 		qrecord_address++;
@@ -129,13 +132,13 @@ bool CorrectSlaveFile(int old_larvae_address, int new_larvae_address, FILE* slav
 	LarvaeRecord lrecord;
 	while (!feof(slave_file) && !ferror(slave_file))
 	{
-		ReadFromFile(slave_file, lrecord);
+		ReadLarvaeFromFile(slave_file, &lrecord);
 
 		if (lrecord.next_record_adress == old_larvae_address)
 		{
 			lrecord.next_record_adress = new_larvae_address;
 			fseek(slave_file, lrecord_address * size_of_larvae_record, SEEK_SET);
-			WriteToFile(lrecord, slave_file);
+			WriteLarvaeToFile(lrecord, slave_file);
 			return true;
 		}
 		lrecord_address++;
@@ -162,12 +165,14 @@ QueenRecord GetQueenRecord(int queen_address, FILE* master_file)
 	if (queen_address == -1)
 	{
 		printf("\nERROR: Element does not exist\n");
-		return QueenRecord{};
+		QueenRecord q;
+		q.queen.queen_id = -1;
+		return q;
 	}
 
 	QueenRecord qrecord;
 	fseek(master_file, queen_address * size_of_queen_record, SEEK_SET);
-	ReadFromFile(master_file, qrecord);
+	ReadQueenFromFile(master_file, &qrecord);
 
 	return qrecord;
 }
@@ -179,7 +184,7 @@ int Get_S(int larvae_id, int queen_id,
 	QueenRecord qrecord = GetQueenRecord(queen_record_address, master_file);
 
 	// Search larvae record in slave file
-	LarvaeRecord lrecord{};
+	LarvaeRecord lrecord; lrecord.larvae.larvae_id = -1;
 	int cur_record_address = qrecord.first_larvae_record_address;
 	int prev_record_address = 0;
 	while ((lrecord.larvae.larvae_id != larvae_id || lrecord.isValid == false)
@@ -187,7 +192,7 @@ int Get_S(int larvae_id, int queen_id,
 	{
 		prev_record_address = cur_record_address;
 		fseek(slave_file, cur_record_address * size_of_larvae_record, SEEK_SET);
-		ReadFromFile(slave_file, lrecord);
+		ReadLarvaeFromFile(slave_file, &lrecord);
 		cur_record_address = lrecord.next_record_adress;
 	}
 
@@ -202,12 +207,14 @@ LarvaeRecord GetLarvaeRecord(int larvae_address, FILE* slave_file)
 	if (larvae_address == -1)
 	{
 		printf("\nERROR: Element does not exist\n");
-		return LarvaeRecord{};
+		LarvaeRecord l;
+		l.larvae.larvae_id = -1;
+		return l;
 ;	}
 
 	LarvaeRecord lrecord;
 	fseek(slave_file, larvae_address * size_of_larvae_record, SEEK_SET);
-	ReadFromFile(slave_file, lrecord);
+	ReadLarvaeFromFile(slave_file, &lrecord);
 
 	return lrecord;
 }
@@ -222,11 +229,11 @@ void Del_S(int larvae_id, int queen_id,
 
 	LarvaeRecord lrecord;
 	fseek(slave_file, larvae_address * size_of_larvae_record, SEEK_SET);
-	ReadFromFile(slave_file, lrecord);
+	ReadLarvaeFromFile(slave_file, &lrecord);
 	
 	lrecord.isValid = false;
 	fseek(slave_file, larvae_address * size_of_larvae_record, SEEK_SET);
-	WriteToFile(lrecord, slave_file);
+	WriteLarvaeToFile(lrecord, slave_file);
 }
 
 void Del_M(int queen_id, FILE* index_file, FILE* master_file, FILE* slave_file)
@@ -238,11 +245,11 @@ void Del_M(int queen_id, FILE* index_file, FILE* master_file, FILE* slave_file)
 	// Invalidate record in master file
 	QueenRecord qrecord;
 	fseek(master_file, queen_address * size_of_queen_record, SEEK_SET);
-	ReadFromFile(master_file, qrecord);
+	ReadQueenFromFile(master_file, &qrecord);
 
 	qrecord.isValid = false;
 	fseek(master_file, queen_address * size_of_queen_record, SEEK_SET);
-	WriteToFile(qrecord, master_file);
+	WriteQueenToFile(qrecord, master_file);
 
 	// Invalidate record in index file
 	int index_file_record_address = GetAddressInIndexFile(queen_id, index_file);
@@ -260,11 +267,11 @@ void Del_M(int queen_id, FILE* index_file, FILE* master_file, FILE* slave_file)
 	while (cur_lrecord_address != -1) 
 	{
 		fseek(slave_file, cur_lrecord_address * size_of_larvae_record, SEEK_SET);
-		ReadFromFile(slave_file, lrecord);
+		ReadLarvaeFromFile(slave_file, &lrecord);
 		// Queen is deleted - del_s cannot be used
 		lrecord.isValid = false;
 		fseek(slave_file, cur_lrecord_address * size_of_larvae_record, SEEK_SET);
-		WriteToFile(lrecord, slave_file);
+		WriteLarvaeToFile(lrecord, slave_file);
 		cur_lrecord_address = lrecord.next_record_adress;
 	}
 }
@@ -274,8 +281,8 @@ void GarbageCollector(FILE* index_file, FILE* master_file, FILE* slave_file,
 {
 	// Read valid records from index file into RAM
 	int non_valid_irecords_count;
-	IndexFileRecord* irecords = ReadIndexFile(index_file, non_valid_irecords_count);
-	IndexFileRecord* valid_irecords = new IndexFileRecord[non_valid_irecords_count];
+	IndexFileRecord* irecords = ReadIndexFile(index_file, &non_valid_irecords_count);
+	IndexFileRecord* valid_irecords = malloc(non_valid_irecords_count * sizeof(IndexFileRecord) + 1);
 	int cur_valid_irecord = 0;
 	for (int i = 0; i < non_valid_irecords_count; i++)
 	{
@@ -283,7 +290,7 @@ void GarbageCollector(FILE* index_file, FILE* master_file, FILE* slave_file,
 			valid_irecords[cur_valid_irecord++] = irecords[i];
 	}
 	int valid_irecords_count = cur_valid_irecord;
-	delete irecords;
+	free(irecords);
 
 
 	// Get rid of garbage in slave file
@@ -297,11 +304,11 @@ void GarbageCollector(FILE* index_file, FILE* master_file, FILE* slave_file,
 	{
 		fseek(slave_file, -1, SEEK_CUR);
 
-		ReadFromFile(slave_file, lrecord);
+		ReadLarvaeFromFile(slave_file, &lrecord);
 
 		if (lrecord.isValid)
 		{
-			WriteToFile(lrecord, temp);
+			WriteLarvaeToFile(lrecord, temp);
 
 			if (old_larvae_address != new_larvae_address)
 			{
@@ -342,11 +349,11 @@ void GarbageCollector(FILE* index_file, FILE* master_file, FILE* slave_file,
 	{
 		fseek(master_file, -1, SEEK_CUR);
 
-		ReadFromFile(master_file, qrecord);
+		ReadQueenFromFile(master_file, &qrecord);
 
 		if (qrecord.isValid)
 		{
-			WriteToFile(qrecord, temp);
+			WriteQueenToFile(qrecord, temp);
 
 			if (old_qrecord_address != new_qrecord_address)
 				CorrectIndexFile(old_qrecord_address, new_qrecord_address,
@@ -371,7 +378,7 @@ void GarbageCollector(FILE* index_file, FILE* master_file, FILE* slave_file,
 
 	// Update index file
 	WriteIndexFile(index_file, valid_irecords, valid_irecords_count);
-	delete[] valid_irecords;
+	free(valid_irecords);
 }
 
 void Update_M(Queen queen,
@@ -384,7 +391,8 @@ void Update_M(Queen queen,
 
 	qrecord.queen = queen;
 	fseek(master_file, queen_address * size_of_queen_record, SEEK_SET);
-	WriteToFile(qrecord, master_file);
+	WriteQueenToFile(qrecord, master_file);
+	fflush(master_file);
 }
 
 void Update_S(Larvae larvae, int queen_id,
@@ -398,19 +406,24 @@ void Update_S(Larvae larvae, int queen_id,
 
 	lrecord.larvae = larvae;
 	fseek(slave_file, larvae_address * size_of_larvae_record, SEEK_SET);
-	WriteToFile(lrecord, slave_file);
+	WriteLarvaeToFile(lrecord, slave_file);
+	fflush(slave_file);
 }
 
 void Insert_M(Queen queen, FILE* index_file, FILE* master_file)
 {
 	// Write in index file
 	int queens_count;
-	IndexFileRecord* irecords = ReadIndexFile(index_file, queens_count);
+	IndexFileRecord* irecords = ReadIndexFile(index_file, &queens_count);
 	index_file = freopen(INDEX_FILE, "wb", index_file);
 
 	if (queens_count == 0)
 	{
-		IndexFileRecord new_irecord{ queen.queen_id, 0, true };
+		IndexFileRecord new_irecord;
+		new_irecord.key = queen.queen_id;
+		new_irecord.address = 0;
+		new_irecord.isValid = true;
+
 		fwrite((char*)&new_irecord, sizeof(IndexFileRecord), 1, index_file);
 	}
 	else
@@ -419,7 +432,11 @@ void Insert_M(Queen queen, FILE* index_file, FILE* master_file)
 		{
 			if (irecords[i].key > queen.queen_id)
 			{
-				IndexFileRecord new_irecord{ queen.queen_id, queens_count, true };
+				IndexFileRecord new_irecord;
+				new_irecord.key = queen.queen_id;
+				new_irecord.address = queens_count;
+				new_irecord.isValid = true;
+
 				fwrite((char*)&new_irecord, sizeof(IndexFileRecord), 1, index_file);
 				while (i < queens_count)
 				{
@@ -433,20 +450,28 @@ void Insert_M(Queen queen, FILE* index_file, FILE* master_file)
 
 				if (i + 1 == queens_count) // Last record
 				{
-					IndexFileRecord new_irecord{ queen.queen_id, queens_count, true };
+					IndexFileRecord new_irecord;
+					new_irecord.key = queen.queen_id;
+					new_irecord.address = queens_count;
+					new_irecord.isValid = true;
+
 					fwrite((char*)&new_irecord, sizeof(IndexFileRecord), 1, index_file);
 				}
 			}
 		}
 	}
-	delete[] irecords;
+	free(irecords);
 	fflush(index_file);
 	index_file = freopen(INDEX_FILE, FILE_MODE, index_file);
 
 	// Append master file
 	master_file = freopen(MASTER_FILE, "ab", master_file);
-	QueenRecord qrecord{ queen, -1, true };
-	WriteToFile(qrecord, master_file);
+	QueenRecord qrecord;
+	qrecord.queen = queen;
+	qrecord.first_larvae_record_address = -1;
+	qrecord.isValid = true;
+
+	WriteQueenToFile(qrecord, master_file);
 	fflush(master_file);
 	master_file = freopen(MASTER_FILE, FILE_MODE, master_file);
 }
@@ -458,13 +483,17 @@ void Insert_S(Larvae larvae, int queen_id,
 	if (queen_address == -1) 
 		return;
 
-	QueenRecord qrecord;
+	QueenRecord qrecord; qrecord.queen.queen_id = -1;
 	fseek(master_file, queen_address * size_of_queen_record, SEEK_SET);
-	ReadFromFile(master_file, qrecord);
+	ReadQueenFromFile(master_file, &qrecord);
 
-	LarvaeRecord lrecord{ larvae, qrecord.first_larvae_record_address, true };
+	LarvaeRecord lrecord;
+	lrecord.larvae = larvae;
+	lrecord.next_record_adress = qrecord.first_larvae_record_address;
+	lrecord.isValid = true;
+
 	slave_file = freopen(SLAVE_FILE, "ab", slave_file);
-	WriteToFile(lrecord, slave_file);
+	WriteLarvaeToFile(lrecord, slave_file);
 	slave_file = freopen(SLAVE_FILE, FILE_MODE, slave_file);
 
 	fseek(slave_file, 0, SEEK_END);
@@ -472,7 +501,9 @@ void Insert_S(Larvae larvae, int queen_id,
 
 	qrecord.first_larvae_record_address = slave_records_count - 1;
 	fseek(master_file, queen_address * size_of_queen_record, SEEK_SET);
-	WriteToFile(qrecord, master_file);
+	WriteQueenToFile(qrecord, master_file);
+	fflush(master_file);
+	fflush(slave_file);
 }
 
 
@@ -537,13 +568,13 @@ void UpdateQueen(FILE* index_file, FILE* master_file)
 	int queen_address = Get_M(queen_id, index_file);
 	QueenRecord qrecord = GetQueenRecord(queen_address, master_file);
 	
-	enum EditingMenu
+	typedef enum
 	{
 		kBreed = 1,
 		kAge,
 		kReproduceAbility,
 		kUpdate = 0
-	};
+	} EditingMenu;
 
 	while (true)
 	{
@@ -661,14 +692,14 @@ void UpdateLarvae(FILE* index_file, FILE* master_file, FILE* slave_file)
 		index_file, master_file, slave_file);
 	LarvaeRecord lrecord = GetLarvaeRecord(larvae_address, slave_file);
 	
-	enum EditingMenu
+	typedef enum
 	{
 		kBreed = 1,
 		kAge,
 		kStage,
 		kFertilization,
 		kUpdate = 0
-	};
+	} EditingMenu;
 
 
 	while (true)
@@ -728,7 +759,7 @@ void PrintIndexFile(FILE* index_file)
 		fseek(index_file, -1, SEEK_CUR);
 
 		fread((char*)&irecord, sizeof(IndexFileRecord), 1, index_file);
-		char* true_false = new char[7];
+		char* true_false = malloc(10);
 		irecord.isValid ? strcpy(true_false, "True") : strcpy(true_false, "False");
 		printf("\n%i           %i               %s\n", irecord.key, irecord.address, true_false);
 
@@ -746,8 +777,8 @@ void PrintMasterFile(FILE* master_file)
 	{
 		fseek(master_file, -1, SEEK_CUR);
 
-		ReadFromFile(master_file, qrecord);
-		char* true_false = new char[7];
+		ReadQueenFromFile(master_file, &qrecord);
+		char* true_false = malloc(10);
 		qrecord.isValid ? strcpy(true_false, "True") : strcpy(true_false, "False");
 		printf("\n%i                %i                          %s\n",
 			qrecord.queen.queen_id, qrecord.first_larvae_record_address, true_false);
@@ -766,8 +797,8 @@ void PrintSlaveFile(FILE* slave_file)
 	{
 		fseek(slave_file, -1, SEEK_CUR);
 
-		ReadFromFile(slave_file, lrecord);
-		char* true_false = new char[7];
+		ReadLarvaeFromFile(slave_file, &lrecord);
+		char* true_false = malloc(10);
 		lrecord.isValid ? strcpy(true_false, "True") : strcpy(true_false, "False");
 		printf("\n%i                %i                          %s\n",
 			lrecord.larvae.larvae_id, lrecord.next_record_adress, true_false);
@@ -778,7 +809,7 @@ void PrintSlaveFile(FILE* slave_file)
 
 void Menu(FILE* index_file, FILE* master_file, FILE* slave_file)
 {
-	enum MainMenu
+	typedef enum
 	{
 		kAddQueen = 1,
 		kGetQueen,
@@ -793,7 +824,8 @@ void Menu(FILE* index_file, FILE* master_file, FILE* slave_file)
 		kPrintMasterFile,
 		kPrintSlaveFile,
 		kExit = 0
-	};
+	} MainMenu;
+
 	while (true) {
 		printf("\n\n	1 - Add Queen\n");
 		printf("	2 - Get Queen\n");
